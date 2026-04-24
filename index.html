@@ -47,14 +47,11 @@ circle.prog {
   font-size: 14px; color: #555;
 }
 .vibrate-toggle span { display: flex; align-items: center; gap: 8px; }
-.toggle-switch {
-  position: relative; width: 44px; height: 26px; cursor: pointer;
-}
+.toggle-switch { position: relative; width: 44px; height: 26px; cursor: pointer; }
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
 .slider {
   position: absolute; inset: 0;
-  background: #ddd; border-radius: 26px;
-  transition: background 0.2s;
+  background: #ddd; border-radius: 26px; transition: background 0.2s;
 }
 .slider::before {
   content: ''; position: absolute;
@@ -154,9 +151,36 @@ function setDash(rem) {
   prog.style.strokeDashoffset = circ * (1 - rem / TOTAL);
 }
 
+// ボタン押下時にAudioContextを作成・アンロックしておく（iPhone対策）
+function unlockAudio() {
+  if (ctx) return;
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // 無音バッファを即再生してiOSのロックを解除
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch(e) {}
+}
+
+function beep() {
+  if (!ctx || !ringing) return;
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.connect(g); g.connect(ctx.destination);
+  o.type = 'sine';
+  o.frequency.setValueAtTime(880, ctx.currentTime);
+  o.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+  g.gain.setValueAtTime(0.4, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+  o.start(ctx.currentTime);
+  o.stop(ctx.currentTime + 0.45);
+}
+
 function startVibrate() {
   if (!canVibrate || !vibrateToggle.checked) return;
-  // 着信っぽいパターン: 振動500ms → 休止300ms を繰り返す
   function doVibrate() {
     if (!ringing) return;
     navigator.vibrate([500, 300]);
@@ -171,22 +195,7 @@ function stopVibrate() {
 }
 
 function playRing() {
-  try { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
-  catch(e) { return; }
   ringing = true;
-  function beep() {
-    if (!ringing) return;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination);
-    o.type = 'sine';
-    o.frequency.setValueAtTime(880, ctx.currentTime);
-    o.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
-    g.gain.setValueAtTime(0.4, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-    o.start(ctx.currentTime);
-    o.stop(ctx.currentTime + 0.45);
-  }
   beep();
   ringInterval = setInterval(beep, 650);
   startVibrate();
@@ -195,8 +204,9 @@ function playRing() {
 function stopRing() {
   ringing = false;
   if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
-  if (ctx) { try { ctx.close(); } catch(e){} ctx = null; }
   stopVibrate();
+  // ctxはリセット時に閉じてnullに戻す（次回ボタン押下で再作成）
+  if (ctx) { try { ctx.close(); } catch(e){} ctx = null; }
 }
 
 function setRingingUI() {
@@ -209,6 +219,7 @@ function setRingingUI() {
 
 function startTimer() {
   if (interval) return;
+  unlockAudio(); // ← ボタン押下の瞬間にアンロック
   startBtn.disabled = true;
   ringNowBtn.disabled = true;
   st.textContent = 'カウントダウン中...';
@@ -228,6 +239,7 @@ function startTimer() {
 
 function ringNow() {
   if (ringing) return;
+  unlockAudio(); // ← ボタン押下の瞬間にアンロック
   clearInterval(interval); interval = null;
   remaining = 0;
   setDash(0);

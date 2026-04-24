@@ -40,6 +40,31 @@ circle.prog {
   line-height: 1;
 }
 .status { font-size: 12px; color: #aaa; margin-top: 8px; letter-spacing: 0.06em; }
+.vibrate-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 14px 18px;
+  background: #f5f5f3; border-radius: 14px;
+  font-size: 14px; color: #555;
+}
+.vibrate-toggle span { display: flex; align-items: center; gap: 8px; }
+.toggle-switch {
+  position: relative; width: 44px; height: 26px; cursor: pointer;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0;
+  background: #ddd; border-radius: 26px;
+  transition: background 0.2s;
+}
+.slider::before {
+  content: ''; position: absolute;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; top: 3px; left: 3px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+input:checked + .slider { background: #1D9E75; }
+input:checked + .slider::before { transform: translateX(18px); }
 .btns { display: flex; flex-direction: column; gap: 12px; width: 100%; }
 button {
   width: 100%; padding: 16px; border-radius: 14px;
@@ -55,6 +80,7 @@ button:active { transform: scale(0.97); }
 #ringNowBtn:disabled { background: #f0f0f0; color: #bbb; cursor: default; transform: none; }
 #resetBtn { background: #f5f5f3; color: #444; }
 #resetBtn:hover { background: #ebebeb; }
+.no-vibrate { font-size: 11px; color: #ccc; text-align: center; }
 </style>
 </head>
 <body>
@@ -71,6 +97,15 @@ button:active { transform: scale(0.97); }
       <div class="status" id="st">待機中</div>
     </div>
   </div>
+
+  <div class="vibrate-toggle">
+    <span>📳 バイブレーション</span>
+    <label class="toggle-switch">
+      <input type="checkbox" id="vibrateToggle" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+  <p class="no-vibrate" id="noVibrateNote" style="display:none;">※ このブラウザはバイブ非対応です（iPhone Safari等）</p>
 
   <div class="btns">
     <button id="startBtn">▶ スタート（1分後に着信）</button>
@@ -89,11 +124,22 @@ const st = document.getElementById('st');
 const startBtn = document.getElementById('startBtn');
 const ringNowBtn = document.getElementById('ringNowBtn');
 const resetBtn = document.getElementById('resetBtn');
+const vibrateToggle = document.getElementById('vibrateToggle');
+const noVibrateNote = document.getElementById('noVibrateNote');
+
 let remaining = TOTAL;
 let interval = null;
 let ringing = false;
 let ctx = null;
 let ringInterval = null;
+let vibrateInterval = null;
+
+const canVibrate = 'vibrate' in navigator;
+if (!canVibrate) {
+  vibrateToggle.disabled = true;
+  vibrateToggle.checked = false;
+  noVibrateNote.style.display = 'block';
+}
 
 prog.style.strokeDasharray = circ;
 prog.style.strokeDashoffset = 0;
@@ -106,6 +152,22 @@ function fmt(s) {
 
 function setDash(rem) {
   prog.style.strokeDashoffset = circ * (1 - rem / TOTAL);
+}
+
+function startVibrate() {
+  if (!canVibrate || !vibrateToggle.checked) return;
+  // 着信っぽいパターン: 振動500ms → 休止300ms を繰り返す
+  function doVibrate() {
+    if (!ringing) return;
+    navigator.vibrate([500, 300]);
+  }
+  doVibrate();
+  vibrateInterval = setInterval(doVibrate, 800);
+}
+
+function stopVibrate() {
+  if (vibrateInterval) { clearInterval(vibrateInterval); vibrateInterval = null; }
+  if (canVibrate) navigator.vibrate(0);
 }
 
 function playRing() {
@@ -127,12 +189,14 @@ function playRing() {
   }
   beep();
   ringInterval = setInterval(beep, 650);
+  startVibrate();
 }
 
 function stopRing() {
   ringing = false;
   if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
   if (ctx) { try { ctx.close(); } catch(e){} ctx = null; }
+  stopVibrate();
 }
 
 function setRingingUI() {

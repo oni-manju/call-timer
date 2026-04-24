@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>着信タイマー</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  background: #f5f5f3;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+}
+.wrap {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 3rem 2rem; gap: 2.5rem;
+  background: #fff; border-radius: 24px;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.08);
+  width: 100%; max-width: 360px; margin: 1.5rem;
+}
+.title {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #888;
+}
+.ring-wrap { position: relative; width: 220px; height: 220px; }
+svg.ring { width: 220px; height: 220px; transform: rotate(-90deg); }
+circle.bg { fill: none; stroke: #ebebeb; stroke-width: 10; }
+circle.prog {
+  fill: none; stroke: #1D9E75; stroke-width: 10; stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear, stroke 0.3s;
+}
+.center-text {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%); text-align: center;
+}
+.countdown {
+  font-size: 52px; font-weight: 300; color: #1a1a1a;
+  letter-spacing: -3px; font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.status { font-size: 12px; color: #aaa; margin-top: 8px; letter-spacing: 0.06em; }
+.btns { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+button {
+  width: 100%; padding: 16px; border-radius: 14px;
+  font-size: 15px; font-weight: 500; cursor: pointer;
+  transition: all 0.15s; font-family: inherit; border: none;
+}
+button:active { transform: scale(0.97); }
+#startBtn { background: #1D9E75; color: #fff; }
+#startBtn:hover { background: #0F6E56; }
+#startBtn:disabled { background: #f0f0f0; color: #bbb; cursor: default; transform: none; }
+#ringNowBtn { background: #E24B4A; color: #fff; }
+#ringNowBtn:hover { background: #A32D2D; }
+#ringNowBtn:disabled { background: #f0f0f0; color: #bbb; cursor: default; transform: none; }
+#resetBtn { background: #f5f5f3; color: #444; }
+#resetBtn:hover { background: #ebebeb; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="title">着信タイマー</span>
+
+  <div class="ring-wrap">
+    <svg class="ring" viewBox="0 0 220 220">
+      <circle class="bg" cx="110" cy="110" r="96"/>
+      <circle class="prog" id="prog" cx="110" cy="110" r="96"/>
+    </svg>
+    <div class="center-text">
+      <div class="countdown" id="cd">1:00</div>
+      <div class="status" id="st">待機中</div>
+    </div>
+  </div>
+
+  <div class="btns">
+    <button id="startBtn">▶ スタート（1分後に着信）</button>
+    <button id="ringNowBtn">📞 今すぐ着信音を鳴らす</button>
+    <button id="resetBtn">■ 停止 / リセット</button>
+  </div>
+</div>
+
+<script>
+const TOTAL = 60;
+const r = 96;
+const circ = 2 * Math.PI * r;
+const prog = document.getElementById('prog');
+const cd = document.getElementById('cd');
+const st = document.getElementById('st');
+const startBtn = document.getElementById('startBtn');
+const ringNowBtn = document.getElementById('ringNowBtn');
+const resetBtn = document.getElementById('resetBtn');
+let remaining = TOTAL;
+let interval = null;
+let ringing = false;
+let ctx = null;
+let ringInterval = null;
+
+prog.style.strokeDasharray = circ;
+prog.style.strokeDashoffset = 0;
+
+function fmt(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
+function setDash(rem) {
+  prog.style.strokeDashoffset = circ * (1 - rem / TOTAL);
+}
+
+function playRing() {
+  try { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+  catch(e) { return; }
+  ringing = true;
+  function beep() {
+    if (!ringing) return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+    g.gain.setValueAtTime(0.4, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    o.start(ctx.currentTime);
+    o.stop(ctx.currentTime + 0.45);
+  }
+  beep();
+  ringInterval = setInterval(beep, 650);
+}
+
+function stopRing() {
+  ringing = false;
+  if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+  if (ctx) { try { ctx.close(); } catch(e){} ctx = null; }
+}
+
+function setRingingUI() {
+  cd.textContent = '0:00';
+  st.textContent = '着信中...';
+  prog.style.stroke = '#E24B4A';
+  startBtn.disabled = true;
+  ringNowBtn.disabled = true;
+}
+
+function startTimer() {
+  if (interval) return;
+  startBtn.disabled = true;
+  ringNowBtn.disabled = true;
+  st.textContent = 'カウントダウン中...';
+  prog.style.stroke = '#1D9E75';
+  interval = setInterval(() => {
+    remaining--;
+    cd.textContent = fmt(remaining);
+    setDash(remaining);
+    if (remaining <= 0) {
+      clearInterval(interval); interval = null;
+      setRingingUI();
+      setDash(0);
+      playRing();
+    }
+  }, 1000);
+}
+
+function ringNow() {
+  if (ringing) return;
+  clearInterval(interval); interval = null;
+  remaining = 0;
+  setDash(0);
+  setRingingUI();
+  playRing();
+}
+
+function reset() {
+  clearInterval(interval); interval = null;
+  stopRing();
+  remaining = TOTAL;
+  cd.textContent = fmt(TOTAL);
+  setDash(TOTAL);
+  st.textContent = '待機中';
+  prog.style.stroke = '#1D9E75';
+  startBtn.disabled = false;
+  ringNowBtn.disabled = false;
+}
+
+startBtn.addEventListener('click', startTimer);
+ringNowBtn.addEventListener('click', ringNow);
+resetBtn.addEventListener('click', reset);
+setDash(TOTAL);
+</script>
+</body>
+</html>

@@ -130,6 +130,7 @@ let ringing = false;
 let ctx = null;
 let ringInterval = null;
 let vibrateInterval = null;
+let melodyIndex = 0;
 
 const canVibrate = 'vibrate' in navigator;
 if (!canVibrate) {
@@ -146,17 +147,26 @@ function fmt(s) {
   const sec = s % 60;
   return m + ':' + String(sec).padStart(2, '0');
 }
-
 function setDash(rem) {
   prog.style.strokeDashoffset = circ * (1 - rem / TOTAL);
 }
 
-// ボタン押下時にAudioContextを作成・アンロックしておく（iPhone対策）
+// ぽろろん系メロディ（C5始まりの明るい着信フレーズ）
+// 周波数: C5=523, E5=659, G5=784, A5=880, B5=988, C6=1047, E6=1319
+const MELODY = [
+  { f: 784, d: 0.12 },  // G5
+  { f: 988, d: 0.12 },  // B5
+  { f: 1047, d: 0.12 }, // C6
+  { f: 1319, d: 0.20 }, // E6
+  { f: 1047, d: 0.12 }, // C6
+  { f: 988, d: 0.12 },  // B5
+  { f: 784, d: 0.28 },  // G5（少し長め）
+];
+
 function unlockAudio() {
   if (ctx) return;
   try {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
-    // 無音バッファを即再生してiOSのロックを解除
     const buf = ctx.createBuffer(1, 1, 22050);
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -165,18 +175,39 @@ function unlockAudio() {
   } catch(e) {}
 }
 
-function beep() {
-  if (!ctx || !ringing) return;
+function playNote(freq, duration, startTime) {
+  if (!ctx) return;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.connect(g); g.connect(ctx.destination);
-  o.type = 'sine';
-  o.frequency.setValueAtTime(880, ctx.currentTime);
-  o.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
-  g.gain.setValueAtTime(0.4, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-  o.start(ctx.currentTime);
-  o.stop(ctx.currentTime + 0.45);
+  o.type = 'triangle'; // triangleが柔らかくスマホっぽい
+  o.frequency.setValueAtTime(freq, startTime);
+  g.gain.setValueAtTime(0, startTime);
+  g.gain.linearRampToValueAtTime(0.35, startTime + 0.01);
+  g.gain.setValueAtTime(0.35, startTime + duration * 0.7);
+  g.gain.linearRampToValueAtTime(0, startTime + duration);
+  o.start(startTime);
+  o.stop(startTime + duration + 0.05);
+}
+
+function playMelody() {
+  if (!ctx || !ringing) return;
+  let t = ctx.currentTime;
+  for (const note of MELODY) {
+    playNote(note.f, note.d, t);
+    t += note.d + 0.02;
+  }
+  return t - ctx.currentTime; // メロディ全体の長さを返す
+}
+
+function startRingLoop() {
+  if (!ringing) return;
+  const melodyDuration = playMelody();
+  const pauseAfter = 1.2; // メロディ後の無音（秒）
+  const totalLoop = (melodyDuration + pauseAfter) * 1000;
+  ringInterval = setTimeout(() => {
+    if (ringing) startRingLoop();
+  }, totalLoop);
 }
 
 function startVibrate() {
@@ -196,16 +227,14 @@ function stopVibrate() {
 
 function playRing() {
   ringing = true;
-  beep();
-  ringInterval = setInterval(beep, 650);
+  startRingLoop();
   startVibrate();
 }
 
 function stopRing() {
   ringing = false;
-  if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+  if (ringInterval) { clearTimeout(ringInterval); ringInterval = null; }
   stopVibrate();
-  // ctxはリセット時に閉じてnullに戻す（次回ボタン押下で再作成）
   if (ctx) { try { ctx.close(); } catch(e){} ctx = null; }
 }
 
@@ -219,7 +248,7 @@ function setRingingUI() {
 
 function startTimer() {
   if (interval) return;
-  unlockAudio(); // ← ボタン押下の瞬間にアンロック
+  unlockAudio();
   startBtn.disabled = true;
   ringNowBtn.disabled = true;
   st.textContent = 'カウントダウン中...';
@@ -239,7 +268,7 @@ function startTimer() {
 
 function ringNow() {
   if (ringing) return;
-  unlockAudio(); // ← ボタン押下の瞬間にアンロック
+  unlockAudio();
   clearInterval(interval); interval = null;
   remaining = 0;
   setDash(0);
